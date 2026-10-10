@@ -60,7 +60,7 @@ Files: `httpsConfig.ts`, `src/httpsConfig.test.ts`, `vite.config.ts`, `.env.exam
 
 - [x] Review each increment and full diff; fix material findings.
 - [x] Run dashboard unit suite/build/format and relevant browser regressions; record baseline failures below.
-- [ ] Commit, create a reviewable PR linked to parent #5, attach it to this chat, and report remaining physical validation.
+- [x] Commit and push the increment, create [draft PR #109](https://github.com/azizu06/pip-scout/pull/109) referencing parent #5, attach it to this chat, and record remaining physical validation.
 
 ## Verification record
 
