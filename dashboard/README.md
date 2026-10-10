@@ -3,6 +3,7 @@
 A desktop spatial-memory workspace showing observations from a configurable WebSocket/REST backend connection. No scene data is generated locally.
 Start with [SPEC.md](SPEC.md), [PLAN.md](PLAN.md), and the shared [wire contract](../docs/INTERFACES.md).
 The [sensor profile](SENSOR_PROFILE.md) documents the five-meter LiDAR range and uncalibrated viewing angle.
+For the read-only Quest camera viewer, trusted HTTPS and USB localhost setup, see [VR.md](VR.md).
 
 ## Run
 

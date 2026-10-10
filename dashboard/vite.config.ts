@@ -2,12 +2,11 @@ import { loadEnv } from "vite";
 import { defineConfig } from "vitest/config";
 import react from "@vitejs/plugin-react";
 import { operatorProxy } from "./operatorProxy";
+import { httpsConfig } from "./httpsConfig";
 export default defineConfig(({ mode }) => {
-  const { GODSEYE_BACKEND_URL, GODSEYE_ROVER_KEY_FILE } = loadEnv(
-    mode,
-    process.cwd(),
-    "GODSEYE_",
-  );
+  const env = loadEnv(mode, process.cwd(), "GODSEYE_");
+  const { GODSEYE_BACKEND_URL, GODSEYE_ROVER_KEY_FILE } = env;
+  const https = httpsConfig(env);
   let target: string | undefined;
   if (GODSEYE_BACKEND_URL) {
     const backend = new URL(GODSEYE_BACKEND_URL);
@@ -47,8 +46,8 @@ export default defineConfig(({ mode }) => {
       operatorProxy(target ? GODSEYE_ROVER_KEY_FILE : undefined),
     ],
     test: { include: ["src/**/*.test.ts"] },
-    server: { proxy },
-    preview: { proxy },
+    server: { proxy, https },
+    preview: { proxy, https },
     build: {
       rollupOptions: {
         output: {

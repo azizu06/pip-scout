@@ -1,3 +1,4 @@
+import { navigateViewer, viewerUrl } from "./vrSession";
 import { useColorSurfaces } from "./useColorSurfaces";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -7,6 +8,7 @@ import {
   CircleHelp,
   Download,
   Focus,
+  Glasses,
   Navigation,
   Plus,
   ScanLine,
@@ -486,6 +488,16 @@ export default function App() {
                 ))}
               </nav>
               <div className="workspace-menu-actions">
+                <button
+                  onClick={() =>
+                    navigateViewer(
+                      viewerUrl(window.location.href, config, true),
+                    )
+                  }
+                  aria-label="Launch VR"
+                >
+                  <Glasses size={16} /> Launch VR
+                </button>
                 <button
                   onClick={() => setSettings(true)}
                   aria-label="Connection settings"
