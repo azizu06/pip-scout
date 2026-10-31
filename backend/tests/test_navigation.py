@@ -1,6 +1,7 @@
 """Pure grid planning and pure-pursuit proof; no sockets, timing, or hardware."""
 import base64
 import math
+import os
 import time
 import unittest
 
@@ -286,11 +287,14 @@ class PlannerTests(unittest.TestCase):
                  ('furnished room, 40% unknown', speckled, (1., 1.), (19., 19.), .2),
                  ('all unknown, corner to corner', np.zeros((400, 400), dtype=np.uint8), (.5, .5), (19.5, 19.5), .2),
                  ('adversarial slalom (full flood)', slalom, (1., 1.), (19., 19.), 1.)]
+        # Budgets are for developer hardware. Shared CI runners are ~3x slower,
+        # so CI sets PERF_BUDGET_SCALE instead of loosening the local budget.
+        scale = float(os.environ.get('PERF_BUDGET_SCALE', '1'))
         for name, cells, start, goal, limit_s in cases:
             ms, result = best_ms(cells, start, goal)
             print(f'\n[bench] 400x400 {name}: {ms:.1f} ms, {result.expansions} expansions, '
                   f'{len(result.points)} waypoints', end='')
-            self.assertLess(ms, limit_s * 1000, name)
+            self.assertLess(ms, limit_s * 1000 * scale, name)
         print()
 
 

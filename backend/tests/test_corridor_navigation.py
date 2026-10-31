@@ -26,14 +26,17 @@ class CorridorTests(unittest.TestCase):
         self.assertFalse(recovery_step_allowed(snapshot, -.004, .01, .5, -.5, .1524))
         self.assertFalse(recovery_step_allowed(snapshot, -.415, .05, .05, -.415, .1524))
 
-    def test_zero_clearance_boundary_can_depart_but_cannot_cross_occupied_interior(self):
+    def test_zero_clearance_boundary_is_start_blocked_and_cannot_cross_occupied_interior(self):
         cells = np.ones((60, 60), np.uint8)
         cells[30, 30] = 2
         snapshot = OccupancySnapshot(('hall', 1), 1, time.monotonic(), (), .414,
                                      (-1.5, -1.5), .05, cells, 0., True)
         self.assertFalse(pursuit_step_allowed(snapshot, .05, .001, -3 * math.pi / 4,
                                               .2, 0., .1, .3, .1524))
-        self.assertTrue(recovery_step_allowed(snapshot, .05, .001, .06, .001, .1524))
+        # Zero clearance is deeper than the inflation minus the extra margin
+        # (the footprint bound), so the start is blocked rather than recoverable.
+        self.assertFalse(recoverable_start(snapshot, .05, .001, .1524))
+        self.assertFalse(recovery_step_allowed(snapshot, .05, .001, .06, .001, .1524))
 
     def test_prototype_can_plan_out_of_extra_clearance_near_a_wall(self):
         cells = np.ones((120, 60), np.uint8)
@@ -60,13 +63,17 @@ class CorridorTests(unittest.TestCase):
 
     def test_prototype_can_leave_close_start_overlap_but_cannot_move_into_it(self):
         cells = np.ones((120, 60), np.uint8)
-        cells[:, 32:] = 2  # obstacle only .1 m from the rover center
+        # Obstacle .3 m from the rover center: inside the .414 m inflation but
+        # outside the .2616 m footprint bound (inflation minus extra margin).
+        cells[:, 36:] = 2
         snapshot = OccupancySnapshot(('hall', 1), 1, time.monotonic(), (), .414,
                                      (-1.5, 0.), .05, cells, 0., True)
+        self.assertFalse(snapshot.traversable(0., 1.))
         self.assertTrue(recoverable_start(snapshot, 0., 1., .1524))
         self.assertTrue(recovery_step_allowed(snapshot, 0., 1., -.01, 1., .1524))
         self.assertFalse(recovery_step_allowed(snapshot, 0., 1., .01, 1., .1524))
-        self.assertFalse(recoverable_start(snapshot, .125, 1., .1524))
+        # Only .1 m from the obstacle is inside the footprint bound: start_blocked.
+        self.assertFalse(recoverable_start(snapshot, .2, 1., .1524))
         self.assertFalse(recoverable_start(snapshot, 0., 1., 0.))
 
     def test_start_escape_cannot_approach_a_second_overlapping_obstacle(self):
@@ -197,9 +204,13 @@ class CorridorTests(unittest.TestCase):
 class CorridorRunTests(unittest.IsolatedAsyncioTestCase):
     async def test_explore_leaves_start_overlap_without_discarding_obstacle(self):
         cells = np.ones((100, 100), np.uint8)
-        cells[38:42, 37:39] = 2  # body/mount-shaped mesh 5 cm behind a front camera
+        # Body/mount-shaped mesh .3 m behind a front camera: inside the .414 m
+        # inflation but outside the footprint bound, so the start is recoverable.
+        # A closer overlap is start_blocked (see test_recorded_explore_start).
+        cells[38:42, 33:34] = 2
         snapshot = OccupancySnapshot(('hall', 1), 1, time.monotonic(), (), .414,
                                      (-2., -2.), .05, cells, 0., True)
+        self.assertFalse(snapshot.traversable(0., 0.))
         pose = [0., 0., math.pi / 2]
         stops, clearances = [], []
         def submit(_generation, _mode, v, w):
@@ -226,7 +237,7 @@ class CorridorRunTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(snapshot.traversable(*pose[:2]))
             self.assertTrue(all(after >= before - 1e-9
                                 for before, after in zip(clearances, clearances[1:])))
-            self.assertTrue(np.all(snapshot.cells[38:42, 37:39] == 2))
+            self.assertTrue(np.all(snapshot.cells[38:42, 33:34] == 2))
         finally:
             await navigator.aclose()
 
