@@ -1,10 +1,13 @@
 """Synthetic benchmark mechanics, never evidence of hardware performance."""
+from functools import partial
 import json
 import math
 from pathlib import Path
 import tempfile
+from types import SimpleNamespace
 import unittest
 
+from backend import navigation, navigator, prototype
 from backend.actuation import TimedMotorCommand
 from backend.navigation import Grid
 from tools.scout_benchmark import (
@@ -70,7 +73,11 @@ class BenchmarkGeometryTests(unittest.TestCase):
 class BenchmarkRunTests(unittest.TestCase):
     def test_single_hallway_obstacle_is_passed_with_early_continuous_steering(self):
         scenario = next(s for s in make_scenarios() if s.name == 'obstacle_detour')
-        result = run_scenario(scenario)
+        # Continuous steering (inner-wheel arc PWM at .2 m/s cruise) is opt-in;
+        # the default keeps the published b03 phone's discrete command contract.
+        continuous = SimpleNamespace(
+            PrototypeActuation=partial(prototype.PrototypeActuation, variable_arc_pwm=True))
+        result = run_scenario(scenario, stack=(navigation, continuous, navigator))
         self.assertTrue(result['metrics']['completed'], result['metrics'])
         self.assertFalse(result['metrics']['collision'])
         self.assertEqual(result['metrics']['pivot_time_s'], 0.)

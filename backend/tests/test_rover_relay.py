@@ -94,7 +94,8 @@ class RelayTests(unittest.IsolatedAsyncioTestCase):
             self.car.send(self.drive(4))
 
     async def test_prototype_gentle_arc_reaches_phone_with_inner_wheel_power(self):
-        self.car.actuation = PrototypeActuation()
+        # inner_power is opt-in: the published b03 phone rejects it by default.
+        self.car.actuation = PrototypeActuation(variable_arc_pwm=True)
         await self.arm()
         self.car.send(self.drive(v_mps=.2, yaw_rate_rps=.1))
         packet = self.car.next_message()

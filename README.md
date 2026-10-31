@@ -304,8 +304,8 @@ The [wire contract](docs/INTERFACES.md) defines message formats and coordinates.
 You need **Python 3.10+**, **Node.js 22+**, and npm. From a fresh checkout:
 
 ```sh
-git clone https://github.com/azizu06/godseye.git
-cd godseye
+git clone https://github.com/azizu06/pip-scout.git
+cd pip-scout
 
 python3 -m venv .venv
 .venv/bin/python -m pip install -r backend/requirements-test.txt -r tools/requirements.txt

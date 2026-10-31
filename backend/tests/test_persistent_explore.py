@@ -12,7 +12,7 @@ import unittest
 import httpx
 import numpy as np
 
-from backend.app import Pose, create_app
+from backend.app import EXPLORE_RETRY_S, Pose, create_app
 from backend.navigator import NavSettings
 from backend.occupancy import OccupancySnapshot
 from backend.prototype import PrototypeActuation, prototype_geometry
@@ -92,13 +92,19 @@ async def rig(*, no_progress_s=100.):
                     await source
 
 
+# Faults never auto-rearm (docs/AUTONOMY.md): after a failed or lost arm, the
+# rover waits for an explicit operator /arm. Wait past the old retry backoff to
+# prove no background rearm happens.
+NO_REARM_WAIT_S = EXPLORE_RETRY_S + .3
+
+
 class PersistentExploreTests(unittest.IsolatedAsyncioTestCase):
     async def select_and_arm(self, client):
         self.assertEqual((await client.post('/mode', json={'mode': 'explore'})).status_code, 200)
         response = await client.post('/arm')
         self.assertEqual(response.status_code, 200, response.text)
 
-    async def test_first_failed_explore_arm_retains_intent_and_recovers(self):
+    async def test_first_failed_explore_arm_waits_for_operator_rearm(self):
         async with rig() as (client, state, car, peer):
             await client.post('/mode', json={'mode': 'explore'})
             car.detach()
@@ -107,20 +113,24 @@ class PersistentExploreTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue((await client.get('/autonomy')).json()['auto_requested'])
             self.assertFalse(state.armed)
             car.attach()
-            await eventually(lambda: state.armed)
-            self.assertGreaterEqual(peer.count('arm'), 1)
+            await asyncio.sleep(NO_REARM_WAIT_S)
+            self.assertFalse(state.armed, 'a reconnect must not rearm without the operator')
+            self.assertEqual(peer.count('arm'), 0)
+            self.assertEqual((await client.post('/arm')).status_code, 200)
+            self.assertTrue(state.armed)
+            self.assertEqual(peer.count('arm'), 1)
 
-    async def test_no_progress_stops_motors_then_waits_before_retrying_the_mission(self):
+    async def test_no_progress_stops_motors_and_never_retries_the_mission(self):
         async with rig(no_progress_s=.12) as (client, state, car, peer):
             await self.select_and_arm(client)
             await eventually(lambda: state.stop_reason == 'no_progress')
-            self.assertTrue(state.auto_requested)
+            self.assertFalse(state.auto_requested, 'a stop clears the Explore request')
             self.assertFalse(state.armed)
             self.assertIsNone(car.armed_session)
             arms = peer.count('arm')
-            await asyncio.sleep(.25)
-            self.assertEqual(peer.count('arm'), arms, 'no-progress recovery must back off after the stop')
-            await eventually(lambda: peer.count('arm') > arms)
+            await asyncio.sleep(NO_REARM_WAIT_S)
+            self.assertEqual(peer.count('arm'), arms, 'no-progress stop must not rearm on its own')
+            self.assertFalse(state.armed)
 
     async def test_no_operator_request_never_arms_on_recovery(self):
         async with rig() as (client, state, car, peer):
@@ -132,7 +142,7 @@ class PersistentExploreTests(unittest.IsolatedAsyncioTestCase):
             self.assertFalse(state.armed)
             self.assertEqual(peer.count('arm'), 0)
 
-    async def test_first_handshake_loss_preserves_request_and_recovers(self):
+    async def test_first_handshake_loss_waits_for_operator_rearm(self):
         async with rig() as (client, state, car, peer):
             await client.post('/mode', json={'mode': 'explore'})
             peer.acknowledge_arm = False
@@ -140,11 +150,15 @@ class PersistentExploreTests(unittest.IsolatedAsyncioTestCase):
             await eventually(lambda: peer.count('arm') == 1)
             car.detach()
             self.assertEqual((await attempt).status_code, 409)
-            self.assertTrue(state.auto_requested)
+            self.assertFalse(state.auto_requested, 'the disconnect stop clears the Explore request')
             self.assertFalse(state.armed)
             peer.acknowledge_arm = True
             car.attach()
-            await eventually(lambda: state.armed)
+            await asyncio.sleep(NO_REARM_WAIT_S)
+            self.assertFalse(state.armed, 'a lost handshake must not rearm without the operator')
+            self.assertEqual(peer.count('arm'), 1)
+            self.assertEqual((await client.post('/arm')).status_code, 200)
+            self.assertTrue(state.armed)
             self.assertEqual(peer.count('arm'), 2)
 
     async def test_no_frontier_waits_and_explores_when_new_floor_opens(self):
@@ -182,36 +196,35 @@ class PersistentExploreTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(state.armed)
             self.assertEqual(peer.count('arm'), 1, 'new floor should resume the same Explore run')
 
-    async def test_explicit_cancellation_wins_over_pending_recovery_handshake(self):
+    async def test_explicit_cancellation_after_disconnect_ignores_a_late_arm_ack(self):
         for path, body in [('/stop', None), ('/mode', {'mode': 'manual'}),
                            ('/device/action', {'action': 'control_disable'})]:
             with self.subTest(path=path):
                 async with rig() as (client, state, car, peer):
                     await self.select_and_arm(client)
                     car.detach()
-                    peer.acknowledge_arm = False
                     car.attach()
-                    await eventually(lambda: peer.count('arm') == 2)
-                    pending_session = next(packet['session'] for _, packet in reversed(peer.packets)
+                    await asyncio.sleep(NO_REARM_WAIT_S)
+                    self.assertFalse(state.armed)
+                    self.assertEqual(peer.count('arm'), 1, 'a reconnect must not start a new arm handshake')
+                    earlier_session = next(packet['session'] for _, packet in reversed(peer.packets)
                                            if packet['type'] == 'arm')
                     await client.post(path, json=body)
-                    car.receive(dict(version=1, type='ack', id='A' + pending_session))
-                    peer.acknowledge_arm = True
+                    car.receive(dict(version=1, type='ack', id='A' + earlier_session))
                     await asyncio.sleep(.2)
                     self.assertFalse(state.auto_requested)
                     self.assertFalse(state.armed)
                     self.assertIsNone(car.armed_session)
-                    self.assertEqual(peer.count('arm'), 2)
+                    self.assertEqual(peer.count('arm'), 1)
 
-    async def test_shutdown_drains_the_pending_recovery_task(self):
+    async def test_disconnect_starts_no_recovery_task_and_shutdown_stays_disarmed(self):
         async with rig() as (client, state, car, peer):
             await self.select_and_arm(client)
             car.detach()
-            peer.acknowledge_arm = False
             car.attach()
-            await eventually(lambda: peer.count('arm') == 2)
-            pending = state.auto_arm_task
-            self.assertFalse(pending.done())
-        self.assertTrue(pending.done(), 'shutdown must await the recovery task before closing the database')
+            await asyncio.sleep(NO_REARM_WAIT_S)
+            self.assertIsNone(state.auto_arm_task, 'faults never schedule a background rearm')
+            self.assertEqual(peer.count('arm'), 1)
         self.assertFalse(state.auto_requested)
+        self.assertFalse(state.armed)
         self.assertIsNone(car.armed_session)

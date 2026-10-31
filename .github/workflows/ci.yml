@@ -1,0 +1,39 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  python:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: python -m pip install -r backend/requirements-test.txt -r tools/requirements.txt
+      - run: python -m unittest discover -s backend/tests
+        env:
+          # Planner benchmark budgets target developer hardware; runners are ~3x slower.
+          PERF_BUDGET_SCALE: "3"
+      - run: python -m unittest discover -s tools/tests
+      - run: python -m tools.car_smoke
+
+  dashboard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: dashboard/package-lock.json
+      - run: npm --prefix dashboard ci
+      - run: npm --prefix dashboard test
+        env:
+          # Capacity test wall-clock budget targets developer hardware.
+          PERF_BUDGET_SCALE: "3"
+      - run: npm --prefix dashboard run build
