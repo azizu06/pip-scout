@@ -33,4 +33,7 @@ jobs:
           cache-dependency-path: dashboard/package-lock.json
       - run: npm --prefix dashboard ci
       - run: npm --prefix dashboard test
+        env:
+          # Capacity test wall-clock budget targets developer hardware.
+          PERF_BUDGET_SCALE: "3"
       - run: npm --prefix dashboard run build
